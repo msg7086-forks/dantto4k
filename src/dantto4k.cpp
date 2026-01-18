@@ -10,6 +10,7 @@
 #include "smartCard.h"
 #include "bufferedOutput.h"
 #include "progressReporter.h"
+#include "ioThread.h"
 
 namespace {
 
@@ -237,36 +238,43 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<uint8_t> inputBuffer;
-    inputBuffer.reserve(chunkSize * 2);
+    // Use the IOThread for reading input
+    IOThread ioThread(*inputStream);
+
+    // Create the first (empty) report to kick off the producer thread
+    ProcessedBuffer report;
+    report.buffer = nullptr;
+    ioThread.returnProcessedBuffer(std::move(report));
+
     while (true) {
-        if (!useStdin && inputStream->eof()) {
+        // 1. Get a buffer filled with data from the producer
+        FilledBuffer filled = ioThread.getFilledBuffer();
+        if (!filled.buffer || filled.view.empty()) {
+            // EOF signal from producer
             break;
         }
 
-        size_t oldSize = inputBuffer.size();
-        size_t bytesToRead = chunkSize;
-        if (oldSize < chunkSize) {
-            inputBuffer.resize(oldSize + bytesToRead);
-            inputStream->read(reinterpret_cast<char*>(inputBuffer.data() + oldSize), chunkSize);
-            std::streamsize bytesRead = inputStream->gcount();
-            inputBuffer.resize(oldSize + bytesRead);
-        }
-
-        MmtTlv::Common::ReadStream stream(inputBuffer);
+        // 2. Process the data using a stream that views the buffer
+        MmtTlv::Common::ReadStream stream(*filled.buffer, filled.view.size());
         while (!stream.isEof()) {
             MmtTlv::DemuxStatus status = demuxer.demux(stream);
-
             if (status == MmtTlv::DemuxStatus::NotEnoughBuffer) {
                 break;
             }
         }
-        
-        auto consumed = inputBuffer.size() - stream.leftBytes();
+
+        size_t consumed = stream.getPos();
         if (consumed > 0) {
             progressReporter.update(consumed);
         }
-        inputBuffer.erase(inputBuffer.begin(), inputBuffer.begin() + consumed);
+
+        // 3. Prepare the report and return the buffer to the producer
+        ProcessedBuffer next_report;
+        next_report.buffer = std::move(filled.buffer);
+        if (consumed < filled.view.size()) {
+            next_report.remaining_view = filled.view.subspan(consumed);
+        }
+        ioThread.returnProcessedBuffer(std::move(next_report));
     }
 
     progressReporter.finish();
