@@ -1,7 +1,17 @@
 #include "acasCard.h"
 #include <random>
 #include <algorithm>
+#include <iostream>
+#include <iomanip>
 #include "config.h"
+
+static void print_hex_simple_acas(const std::string& label, const uint8_t* data, size_t len) {
+    std::cout << label << ": ";
+    for (size_t i = 0; i < len; ++i) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
+    }
+    std::cout << std::dec << std::endl;
+}
 
 bool AcasCard::getA0AuthKcl(sha256_t& output) {
     std::default_random_engine engine(std::random_device{}());
@@ -53,6 +63,14 @@ bool AcasCard::getA0AuthKcl(sha256_t& output) {
 
     if (!std::equal(hash.begin(), hash.end(), a0hash.begin())) {
         return false;
+    }
+
+    static int a0_debug = 0;
+    if (a0_debug < 2) {
+        std::cout << "[AcasCard] Debugging Kcl derivation:" << std::endl;
+        print_hex_simple_acas("  plainKcl (48 bytes)", plainKcl.data(), plainKcl.size());
+        print_hex_simple_acas("  kcl (32 bytes)", kcl.data(), kcl.size());
+        a0_debug++;
     }
 
     output = kcl;
@@ -116,6 +134,15 @@ bool AcasCard::ecm(const std::vector<uint8_t>& ecm, DecryptionKey& output) {
         plainData.insert(plainData.end(), ecmInit.begin(), ecmInit.end());
 
         sha256_t hash = SHA256::hash(plainData);
+
+        static int ecm_debug = 0;
+        if (ecm_debug < 2) {
+            std::cout << "[AcasCard] Debugging CW derivation:" << std::endl;
+            print_hex_simple_acas("  plainData (55 bytes)", plainData.data(), plainData.size());
+            print_hex_simple_acas("  ecmResponse (32 bytes)", ecmResponse.data(), ecmResponse.size());
+            print_hex_simple_acas("  finalHash (32 bytes)", hash.data(), hash.size());
+            ecm_debug++;
+        }
 
         for (size_t i = 0; i < hash.size(); i++) {
             hash[i] ^= ecmResponse[i];
