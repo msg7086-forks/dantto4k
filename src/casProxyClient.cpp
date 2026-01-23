@@ -1,4 +1,6 @@
 #include "casProxyClient.h"
+#include <iostream>
+#include <cstdio>
 
 CasProxyClient::CasProxyClient(const std::string& host, uint16_t port)
     : host(host), port(port), resolver(io_context), socket(io_context), connectionTimer(io_context), workGuard(asio::make_work_guard(io_context)) {
@@ -376,6 +378,7 @@ LONG CasProxyClient::scardListReaders(SCARDCONTEXT hContext, LPCSTR mszGroups, L
 }
 
 LONG CasProxyClient::scardConnect(SCARDCONTEXT hContext, LPCSTR szReader, DWORD dwShareMode, DWORD dwPreferredProtocols, LPSCARDHANDLE phCard, LPDWORD pdwActiveProtocol) {
+    std::cout << "DEBUG CasProxy: scardConnect requested for reader: " << (szReader ? szReader : "NULL") << std::endl;
     casproxy::SCardConnectRequest req;
     req.hContext = hContext;
     req.szReader = szReader;
@@ -389,6 +392,7 @@ LONG CasProxyClient::scardConnect(SCARDCONTEXT hContext, LPCSTR szReader, DWORD 
 
     auto res = std::dynamic_pointer_cast<casproxy::SCardConnectResponse>(*r);
     if (res->resultCode != 0) {
+        std::cout << "DEBUG CasProxy: scardConnect ERROR response. ResultCode: 0x" << std::hex << res->resultCode << std::dec << std::endl;
         throw std::runtime_error(std::string("CasProxyServer returned an error response"));
     }
 
@@ -456,6 +460,10 @@ LONG CasProxyClient::scardEndTransaction(SCARDHANDLE hCard, DWORD dwDisposition)
 }
 
 LONG CasProxyClient::scardTransmit(SCARDHANDLE hCard, LPCSCARD_IO_REQUEST pioSendPci, LPCBYTE pbSendBuffer, DWORD cbSendLength, LPSCARD_IO_REQUEST pioRecvPci, LPBYTE pbRecvBuffer, LPDWORD pcbRecvLength) {
+    std::cout << "DEBUG CasProxy: scardTransmit SEND (" << cbSendLength << " bytes): ";
+    for(DWORD i=0; i<cbSendLength; ++i) printf("%02x ", pbSendBuffer[i]);
+    std::cout << std::endl;
+
     casproxy::SCardTransmitRequest req;
     req.hCard = hCard;
     if (pioSendPci == nullptr) {
@@ -488,8 +496,13 @@ LONG CasProxyClient::scardTransmit(SCARDHANDLE hCard, LPCSCARD_IO_REQUEST pioSen
 
     auto res = std::dynamic_pointer_cast<casproxy::SCardTransmitResponse>(*r);
     if (res->resultCode != 0) {
+        std::cout << "DEBUG CasProxy: scardTransmit ERROR response. ResultCode: 0x" << std::hex << res->resultCode << std::dec << std::endl;
         throw std::runtime_error(std::string("CasProxyServer returned an error response"));
     }
+
+    std::cout << "DEBUG CasProxy: scardTransmit RECV (" << res->recvBuffer.size() << " bytes): ";
+    for(auto b : res->recvBuffer) printf("%02x ", b);
+    std::cout << std::endl;
 
     if (pbRecvBuffer != nullptr) {
         memcpy(pbRecvBuffer, res->recvBuffer.data(), std::min(*pcbRecvLength, static_cast<DWORD>(res->recvBuffer.size())));
