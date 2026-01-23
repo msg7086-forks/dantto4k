@@ -2,6 +2,16 @@
 #include "config.h"
 #include "mmtp.h"
 #include "aes.h"
+#include <iostream>
+#include <iomanip>
+
+static void print_hex_simple(const std::string& label, const uint8_t* data, size_t len) {
+    std::cout << label << ": ";
+    for (size_t i = 0; i < len; ++i) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
+    }
+    std::cout << std::dec << std::endl;
+}
 
 AcasHandler::AcasHandler() {
     acasCard = std::make_unique<AcasCard>();
@@ -49,6 +59,14 @@ bool AcasHandler::decrypt(MmtTlv::Mmtp& mmtp) {
     memcpy(iv.data(), &packetIdBe, 2);
     memcpy(iv.data() + 2, &packetSequenceNumberBe, 4);
 
+    static int decrypt_count = 0;
+    if (decrypt_count < 10) {
+        std::cout << "[Dantto] Decrypting PID=0x" << std::hex << mmtp.packetId << " Seq=" << mmtp.packetSequenceNumber << std::dec << " Len=" << (mmtp.payload.size() - 8) << std::endl;
+        print_hex_simple("  Key", (*key).data(), 16);
+        print_hex_simple("  IV ", iv.data(), 16);
+        print_hex_simple("  Src", mmtp.payload.data() + 8, std::min((size_t)16, mmtp.payload.size() - 8));
+    }
+
     if (hasAESNI) { [[likely]]
         if (lastKey != *key) { [[unlikely]]
             aes.setKey(*key);
@@ -61,6 +79,11 @@ bool AcasHandler::decrypt(MmtTlv::Mmtp& mmtp) {
         struct AES_ctx ctx;
         AES_init_ctx_iv(&ctx, (*key).data(), iv.data());
         AES_CTR_xcrypt_buffer(&ctx, mmtp.payload.data() + 8, static_cast<int>(mmtp.payload.size() - 8));
+    }
+
+    if (decrypt_count < 10) {
+        print_hex_simple("  Dst", mmtp.payload.data() + 8, std::min((size_t)16, mmtp.payload.size() - 8));
+        decrypt_count++;
     }
 
     return true;
@@ -101,7 +124,7 @@ std::optional<std::array<uint8_t, 16>> AcasHandler::getDecryptionKey(MmtTlv::Enc
 
 void AcasHandler::worker() {
     while (true) {
-        ECM current;
+        std::vector<uint8_t> ecmData;
         {
             std::unique_lock<std::mutex> lock(queueMutex);
             queueCv.wait(lock, [&]() {
@@ -112,24 +135,19 @@ void AcasHandler::worker() {
                 break;
             }
 
-            current = std::move(queue.front());
+            ecmData = queue.front();
         }
 
-        AcasCard::DecryptionKey key = {};
-        acasCard->ecm(current, key);
-
-        {
+        AcasCard::DecryptionKey k;
+        if (acasCard->ecm(ecmData, k)) {
             std::lock_guard<std::mutex> lock(keyMutex);
-            this->key = key;
+            key = k;
         }
 
         {
             std::lock_guard<std::mutex> lock(queueMutex);
             queue.pop();
-
-            if (queue.empty()) {
-                queueCv.notify_all();
-            }
         }
+        queueCv.notify_all();
     }
 }
