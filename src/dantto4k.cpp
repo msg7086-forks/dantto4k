@@ -3,6 +3,7 @@
 #include "stream.h"
 #include "remuxerHandler.h"
 #include "config.h"
+#include "ttmlToAssConverter.h"
 #include "mmtTlvDemuxer.h"
 #include "aribUtil.h"
 #include "casProxyClient.h"
@@ -201,6 +202,8 @@ int main(int argc, char* argv[]) {
     MmtTlv::MmtTlvDemuxer demuxer;
     RemuxerHandler handler(demuxer);
     std::unique_ptr<BufferedOutput> bufferedOutput;
+    std::unique_ptr<std::ofstream> assFileStream;
+    std::unique_ptr<TtmlToAssConverter> ttmlToAssConverter;
 
     if (useStdout) {
         handler.setOutputCallback([&](const uint8_t* data, size_t size) {
@@ -213,6 +216,41 @@ int main(int argc, char* argv[]) {
         handler.setOutputCallback([&, bo = bufferedOutput.get()](const uint8_t* data, size_t size) {
             assert(size == 188);
             bo->write(data, size);
+        });
+
+        ttmlToAssConverter = std::make_unique<TtmlToAssConverter>();
+        int writeCount = 0;
+        handler.setSubtitleOutputCallback([&, writeCount](const std::string_view& ttml) mutable {
+            if (ttmlToAssConverter) {
+                std::string ass = ttmlToAssConverter->convert(ttml);
+                if (!ass.empty()) {
+                    if (!assFileStream) {
+                        std::string assFileName = args.output;
+                        size_t pos = assFileName.rfind(".ts");
+                        if (pos != std::string::npos) {
+                            assFileName.replace(pos, 3, ".kingyubi.ass");
+                        }
+                        else {
+                            assFileName += ".kingyubi.ass";
+                        }
+                        assFileStream = std::make_unique<std::ofstream>(assFileName, std::ios::binary);
+                        if (!assFileStream->is_open()) {
+                            std::cerr << "Unable to open output file: " << assFileName << std::endl;
+                            assFileStream.reset();
+                            return;
+                        }
+                    }
+
+                    if (assFileStream) {
+                        assFileStream->write(ass.c_str(), ass.length());
+                        writeCount++;
+                        if (writeCount >= 16) {
+                            assFileStream->flush();
+                            writeCount = 0;
+                        }
+                    }
+                }
+            }
         });
     }
 

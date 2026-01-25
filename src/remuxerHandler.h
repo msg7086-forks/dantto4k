@@ -74,7 +74,9 @@ public:
 
 public:
 	using OutputCallback = std::function<void(const uint8_t*, size_t)>;
+	using SubtitleOutputCallback = std::function<void(const std::string&)>;
 	void setOutputCallback(OutputCallback cb);
+	void setSubtitleOutputCallback(SubtitleOutputCallback cb);
 	void clear();
 
 private:
@@ -83,6 +85,7 @@ private:
 	void writeCaptionManagementData(uint64_t pts);
 	MmtTlv::MmtTlvDemuxer& demuxer;
 	OutputCallback outputCallback;
+	SubtitleOutputCallback subtitleOutputCallback;
 	std::unordered_map<uint16_t, uint16_t> mapService2Pid;
 	std::unordered_map<uint16_t, uint8_t> mapCC;
 	std::unordered_map<uint16_t, std::vector<uint8_t>> mapPesPendingData;

@@ -142,6 +142,11 @@ void RemuxerHandler::onAudioData(const MmtTlv::MmtStream& mmtStream, const MmtTl
 
 void RemuxerHandler::onSubtitleData(const MmtTlv::MmtStream& mmtStream, const struct MmtTlv::MfuData& mfuData) {
     std::string ttml(mfuData.data.begin(), mfuData.data.end());
+
+    if (subtitleOutputCallback) {
+        subtitleOutputCallback(ttml);
+    }
+
     std::list<B24SubtitleOutput> output;
     B24SubtitleConvertor::convert(ttml, output);
 
@@ -178,6 +183,10 @@ void RemuxerHandler::onPacketDrop(uint16_t packetId, const MmtTlv::MmtStream* mm
 
 void RemuxerHandler::setOutputCallback(OutputCallback cb) {
     outputCallback = std::move(cb);
+}
+
+void RemuxerHandler::setSubtitleOutputCallback(SubtitleOutputCallback cb) {
+    subtitleOutputCallback = std::move(cb);
 }
 
 void RemuxerHandler::writeStream(const MmtTlv::MmtStream& mmtStream, const MmtTlv::MfuData& mfuData, const std::vector<uint8_t>& streamData) {
